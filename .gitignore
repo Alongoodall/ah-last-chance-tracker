@@ -1,11 +1,42 @@
+# Python
 .venv/
 __pycache__/
 *.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Environment
 .env
+
+# OS
 .DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Testing / linting caches
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+htmlcov/
+.coverage
+
+# Data (kept locally, not committed)
 data/*
 !data/.gitkeep
 
+# Database files
+*.db
+*.db-journal
+
+# Frontend (will be filled in later)
+frontend/node_modules/
+frontend/.next/
+
+# Notebooks checkpoints
+.ipynb_checkpoints/
