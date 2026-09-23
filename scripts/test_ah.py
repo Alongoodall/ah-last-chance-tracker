@@ -11,6 +11,7 @@ Examples:
     python scripts/test_ah.py --store-id 1527 --save-fixture
 
 Use ``python scripts/find_store.py <postal_code>`` to discover store IDs.
+Requires authentication: ``python scripts/ah_login.py`` first.
 """
 
 import argparse
@@ -24,18 +25,25 @@ from pathlib import Path
 sys.path.insert(0, "backend")
 
 from app.ah.client import AHClient  # noqa: E402
-from app.ah import AHError, AHGraphQLError  # noqa: E402
+from app.ah import AHError, AHAuthenticationError  # noqa: E402
+from app.ah.token_store import TokenStore  # noqa: E402
 
 
 async def main(store_id: int, *, raw: bool = False, save_fixture: bool = False) -> None:
-    async with AHClient() as client:
+    token_store = TokenStore()
+
+    # Check auth status
+    tokens = token_store.load()
+    if tokens is None:
+        print("Not authenticated. Run: python scripts/ah_login.py")
+        sys.exit(1)
+
+    async with AHClient(token_store=token_store) as client:
         # -- Raw mode: print the unprocessed JSON and optionally save -----
         if raw:
             print(f"\nFetching raw bargains for store {store_id}...\n")
             data = await client.get_bargains_raw(store_id)
 
-            # Sanitise: the raw data never contains auth tokens (the
-            # GraphQL response is just product data), but let's be explicit.
             sanitised = json.dumps(data, indent=2, ensure_ascii=False)
             print(sanitised)
 
@@ -49,18 +57,7 @@ async def main(store_id: int, *, raw: bool = False, save_fixture: bool = False) 
 
         # -- Normal mode: human-readable output ---------------------------
         print(f"\nFetching Laatste Kans Koopjes for store {store_id}...\n")
-        try:
-            bargains = await client.get_bargains(store_id)
-        except AHGraphQLError as exc:
-            if "Subgraph errors redacted" in str(exc):
-                print("AH API Limitation Hit:")
-                print("The Albert Heijn API returned 'Subgraph errors redacted'.")
-                print("This typically means the 'bargainItems' endpoint is currently")
-                print("disabled, restricted to authenticated users, or experiencing")
-                print("server-side issues at Albert Heijn. We successfully reached")
-                print("the API and authenticated, but AH refused to serve the bargains.")
-                return
-            raise
+        bargains = await client.get_bargains(store_id)
 
         if not bargains:
             print("No bargains found.")
@@ -139,6 +136,9 @@ if __name__ == "__main__":
     args = parse_args()
     try:
         asyncio.run(main(args.store_id, raw=args.raw, save_fixture=args.save_fixture))
+    except AHAuthenticationError as exc:
+        print(f"\n✗ {exc}", file=sys.stderr)
+        sys.exit(1)
     except AHError as exc:
         print(f"\nError: {exc}", file=sys.stderr)
         sys.exit(1)

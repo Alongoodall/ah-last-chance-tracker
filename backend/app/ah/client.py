@@ -4,12 +4,17 @@ All endpoint details are derived from the appie-go open-source project
 (https://github.com/gwillem/appie-go).  The AH mobile API is undocumented
 and may change without notice.
 
-Authentication flow
--------------------
-1. POST /mobile-auth/v1/auth/token/anonymous  →  anonymous access_token
-2. Use ``Authorization: Bearer <token>`` on all subsequent requests.
+Authentication
+--------------
+The client supports two authentication modes:
 
-No user credentials are required for browsing products or bargains.
+1. **Anonymous** — ``POST /mobile-auth/v1/auth/token/anonymous``.
+   Sufficient for store search but NOT for bargain retrieval.
+
+2. **Authenticated** — Browser-based OAuth login via ``login.ah.nl``.
+   Required for ``bargainItems`` and most other personalised endpoints.
+   The client loads tokens from a :class:`TokenStore`, and automatically
+   refreshes expired access tokens using the refresh token.
 
 GraphQL
 -------
@@ -19,7 +24,7 @@ endpoint with different query documents.
 
 from __future__ import annotations
 
-import time
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -37,6 +42,7 @@ from app.ah.models import (
     BargainItemsResult,
     StoresSearchResult,
 )
+from app.ah.token_store import AuthTokens, TokenStore
 
 logger = structlog.stdlib.get_logger()
 
@@ -96,11 +102,17 @@ _RETRY_BACKOFF = 1.0  # seconds, doubled on each retry
 class AHClient:
     """Async client for the Albert Heijn mobile API.
 
-    Usage::
+    Usage with authenticated access::
+
+        token_store = TokenStore()
+        async with AHClient(token_store=token_store) as client:
+            stores = await client.search_stores("1091")
+            bargains = await client.get_bargains(stores[0].id)
+
+    Usage with anonymous access (stores only)::
 
         async with AHClient() as client:
             stores = await client.search_stores("1091")
-            bargains = await client.get_bargains(stores[0].id)
     """
 
     def __init__(
@@ -108,16 +120,30 @@ class AHClient:
         *,
         base_url: str = _BASE_URL,
         timeout: float = _DEFAULT_TIMEOUT,
+        token_store: TokenStore | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
+        self._token_store = token_store
         self._access_token: str | None = None
+        self._refresh_token: str | None = None
         self._http: httpx.AsyncClient | None = None
 
     # -- Context manager --------------------------------------------------
 
     async def __aenter__(self) -> "AHClient":
         self._http = httpx.AsyncClient(timeout=self._timeout)
+        # Load tokens from store if available
+        if self._token_store:
+            tokens = self._token_store.load()
+            if tokens:
+                self._access_token = tokens.access_token
+                self._refresh_token = tokens.refresh_token
+                if tokens.is_expired:
+                    logger.info("ah_token_expired_on_load")
+                    await self._refresh_access_token()
+                else:
+                    logger.info("ah_token_loaded_from_store")
         return self
 
     async def __aexit__(self, *exc: object) -> None:
@@ -150,11 +176,32 @@ class AHClient:
             )
         return self._http
 
-    async def _ensure_token(self) -> None:
-        """Obtain an anonymous token if we don't have one yet."""
+    @property
+    def is_authenticated(self) -> bool:
+        """Return ``True`` if we have an access token (anonymous or login-based)."""
+        return self._access_token is not None
+
+    async def _ensure_authenticated(self) -> None:
+        """Ensure we have a valid authenticated token.
+
+        Raises ``AHAuthenticationError`` if no tokens are available.
+        This is for endpoints that require login-based auth (e.g. bargainItems).
+        """
         if self._access_token is not None:
             return
-        await self.authenticate()
+
+        raise AHAuthenticationError(
+            "Not authenticated. Run: python scripts/ah_login.py"
+        )
+
+    async def _ensure_any_token(self) -> None:
+        """Ensure we have at least an anonymous token.
+
+        Used for endpoints that work with anonymous access (e.g. storesSearch).
+        """
+        if self._access_token is not None:
+            return
+        await self._get_anonymous_token()
 
     async def _post_json(
         self,
@@ -230,10 +277,17 @@ class AHClient:
         )
 
     async def _graphql(
-        self, query: str, variables: dict[str, Any],
+        self,
+        query: str,
+        variables: dict[str, Any],
+        *,
+        require_auth: bool = False,
     ) -> dict[str, Any]:
         """Execute a GraphQL query against the AH API."""
-        await self._ensure_token()
+        if require_auth:
+            await self._ensure_authenticated()
+        else:
+            await self._ensure_any_token()
 
         body = {"query": query, "variables": variables}
         data = await self._post_json("/graphql", body)
@@ -246,13 +300,13 @@ class AHClient:
 
         return data.get("data", {})
 
-    # -- Public API -------------------------------------------------------
+    # -- Authentication ---------------------------------------------------
 
-    async def authenticate(self) -> None:
+    async def _get_anonymous_token(self) -> None:
         """Obtain an anonymous access token.
 
         No user credentials are required.  The token allows browsing
-        products, stores, and bargains.
+        stores but NOT bargain retrieval.
         """
         body = {"clientId": _CLIENT_ID}
 
@@ -272,10 +326,91 @@ class AHClient:
         self._access_token = token
         logger.info("ah_auth_anonymous_success")
 
+    async def exchange_code(self, code: str) -> AuthTokens:
+        """Exchange an authorization code for access and refresh tokens.
+
+        This is step 2 of the OAuth flow: after the user logs in and we
+        capture the code, we exchange it here.
+
+        Args:
+            code: The authorization code from the login callback.
+
+        Returns:
+            The :class:`AuthTokens` containing access and refresh tokens.
+        """
+        body = {
+            "clientId": _CLIENT_ID,
+            "code": code,
+        }
+
+        logger.info("ah_auth_exchange_start")
+        data = await self._post_json(
+            "/mobile-auth/v1/auth/token",
+            body,
+            include_auth=False,
+        )
+
+        tokens = AuthTokens.from_api_response(data)
+        self._access_token = tokens.access_token
+        self._refresh_token = tokens.refresh_token
+
+        # Save to store if available
+        if self._token_store:
+            self._token_store.save(tokens)
+
+        logger.info("ah_auth_exchange_success")
+        return tokens
+
+    async def _refresh_access_token(self) -> None:
+        """Refresh the access token using the refresh token.
+
+        Called automatically when the access token has expired.
+        """
+        if not self._refresh_token:
+            raise AHAuthenticationError(
+                "No refresh token available. Run: python scripts/ah_login.py"
+            )
+
+        body = {
+            "clientId": _CLIENT_ID,
+            "refreshToken": self._refresh_token,
+        }
+
+        logger.info("ah_auth_refresh_start")
+        try:
+            data = await self._post_json(
+                "/mobile-auth/v1/auth/token/refresh",
+                body,
+                include_auth=False,
+            )
+        except AHAuthenticationError:
+            # Refresh token is also expired/invalid
+            logger.warning("ah_auth_refresh_failed")
+            self._access_token = None
+            self._refresh_token = None
+            if self._token_store:
+                self._token_store.clear()
+            raise AHAuthenticationError(
+                "Refresh token expired. Run: python scripts/ah_login.py"
+            )
+
+        tokens = AuthTokens.from_api_response(data)
+        self._access_token = tokens.access_token
+        self._refresh_token = tokens.refresh_token
+
+        # Save refreshed tokens
+        if self._token_store:
+            self._token_store.save(tokens)
+
+        logger.info("ah_auth_refresh_success")
+
+    # -- Public API -------------------------------------------------------
+
     async def search_stores(self, postal_code: str) -> list[AHStore]:
         """Search for AH stores near a postal code.
 
         Returns up to 5 stores matching the postal code.
+        Works with both anonymous and authenticated tokens.
 
         Raises:
             AHStoreNotFoundError: No stores found for the given postal code.
@@ -284,12 +419,8 @@ class AHClient:
             "filter": {"postalCode": postal_code},
         }
 
-        raw = await self._graphql(_STORES_SEARCH_QUERY, variables)
-
-        logger.info(
-            "ah_stores_search",
-            postal_code=postal_code,
-            raw_keys=list(raw.keys()),
+        raw = await self._graphql(
+            _STORES_SEARCH_QUERY, variables, require_auth=False,
         )
 
         result = StoresSearchResult.model_validate(raw)
@@ -311,6 +442,8 @@ class AHClient:
     async def get_bargains(self, store_id: int) -> list[AHBargainItem]:
         """Retrieve Laatste Kans Koopjes for a specific store.
 
+        **Requires authenticated access** (login-based token).
+
         Args:
             store_id: The numeric AH store identifier.
 
@@ -321,7 +454,9 @@ class AHClient:
         """
         variables: dict[str, Any] = {"storeId": str(store_id)}
 
-        raw = await self._graphql(_BARGAIN_ITEMS_QUERY, variables)
+        raw = await self._graphql(
+            _BARGAIN_ITEMS_QUERY, variables, require_auth=True,
+        )
 
         result = BargainItemsResult.model_validate(raw)
         bargains = result.bargain_items
@@ -337,11 +472,15 @@ class AHClient:
     async def get_bargains_raw(self, store_id: int) -> dict[str, Any]:
         """Retrieve raw JSON for Laatste Kans Koopjes (for debugging).
 
+        **Requires authenticated access** (login-based token).
+
         Same request as :meth:`get_bargains` but returns the unprocessed
         GraphQL ``data`` dict.
         """
         variables: dict[str, Any] = {"storeId": str(store_id)}
-        return await self._graphql(_BARGAIN_ITEMS_QUERY, variables)
+        return await self._graphql(
+            _BARGAIN_ITEMS_QUERY, variables, require_auth=True,
+        )
 
 
 async def _async_sleep(seconds: float) -> None:
