@@ -21,12 +21,11 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Ensure backend/ is on the path
-sys.path.insert(0, "backend")
+import _cli_common  # noqa: F401 — suppress logging
 
-from app.ah.client import AHClient  # noqa: E402
-from app.ah import AHError, AHAuthenticationError  # noqa: E402
-from app.ah.token_store import TokenStore  # noqa: E402
+from app.ah.client import AHClient
+from app.ah import AHError, AHAuthenticationError
+from app.ah.token_store import TokenStore
 
 
 async def main(store_id: int, *, raw: bool = False, save_fixture: bool = False) -> None:

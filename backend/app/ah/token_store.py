@@ -31,17 +31,15 @@ _APP_NAME = "ah-last-chance-tracker"
 
 
 def _default_config_dir() -> Path:
-    """Return the platform-appropriate config directory.
+    """Return the config directory for token storage.
 
-    Uses ``platformdirs`` if available, otherwise falls back to
-    ``~/.config/<app>``.
+    Uses ``~/.config/<app>`` following the XDG convention (matching
+    ``appie-go``'s behaviour).  Respects ``$XDG_CONFIG_HOME`` if set.
     """
-    try:
-        import platformdirs
-
-        return Path(platformdirs.user_config_dir(_APP_NAME, ensure_exists=False))
-    except ImportError:
-        return Path.home() / ".config" / _APP_NAME
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    if xdg:
+        return Path(xdg) / _APP_NAME
+    return Path.home() / ".config" / _APP_NAME
 
 
 def default_token_path() -> Path:

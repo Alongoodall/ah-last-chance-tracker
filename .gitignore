@@ -9,6 +9,9 @@ build/
 # Environment
 .env
 
+# Auth tokens (safety net — stored outside repo by default)
+tokens.json
+
 # OS
 .DS_Store
 Thumbs.db

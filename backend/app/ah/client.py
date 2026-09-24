@@ -141,7 +141,14 @@ class AHClient:
                 self._refresh_token = tokens.refresh_token
                 if tokens.is_expired:
                     logger.info("ah_token_expired_on_load")
-                    await self._refresh_access_token()
+                    try:
+                        await self._refresh_access_token()
+                    except AHAuthenticationError:
+                        # Refresh failed — clear tokens; caller will get a
+                        # clear error when they try an authenticated endpoint.
+                        logger.warning("ah_auto_refresh_failed_on_load")
+                        self._access_token = None
+                        self._refresh_token = None
                 else:
                     logger.info("ah_token_loaded_from_store")
         return self

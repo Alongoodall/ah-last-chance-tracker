@@ -5,11 +5,9 @@ Usage:
     python scripts/ah_auth_status.py
 """
 
-import sys
+import _cli_common  # noqa: F401 — suppress logging
 
-sys.path.insert(0, "backend")
-
-from app.ah.token_store import TokenStore  # noqa: E402
+from app.ah.token_store import TokenStore
 
 
 def main() -> None:

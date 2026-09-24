@@ -85,6 +85,31 @@ uvicorn app.main:app --reload --app-dir backend
 pytest
 ```
 
+### Authentication
+
+The Albert Heijn API requires a logged-in account to fetch bargains.
+
+```bash
+# Start the interactive login flow (opens your browser)
+python scripts/ah_login.py
+
+# Check your current authentication status
+python scripts/ah_auth_status.py
+```
+Tokens are saved securely outside the repository (e.g. `~/.config/ah-last-chance-tracker/tokens.json`).
+
+### Utilities
+
+Find an Albert Heijn store near you to get its ID:
+```bash
+python scripts/find_store.py 1091
+```
+
+Test fetching bargains for a specific store:
+```bash
+python scripts/test_ah.py --store-id 2203
+```
+
 ### Running the collector
 
 _Not yet implemented — coming in Phase 5/6._
@@ -109,7 +134,6 @@ run once the models are in place (Phase 4).
 
 ## Current limitations
 
-- No AH API integration yet (Phase 2)
 - No database models (Phase 3–4)
 - No collector (Phase 5–6)
 - No dashboard (Phase 8)

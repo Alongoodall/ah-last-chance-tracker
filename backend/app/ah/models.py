@@ -7,7 +7,7 @@ so that no information is silently lost.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ---------------------------------------------------------------------------
@@ -47,6 +47,11 @@ class AHBargainProduct(BaseModel):
     brand: str = ""
     sales_unit_size: str = Field(default="", alias="salesUnitSize")
 
+    @field_validator("brand", "sales_unit_size", mode="before")
+    @classmethod
+    def _coerce_none(cls, v: str | None) -> str:
+        return v or ""
+
 
 class AHBargainMarkdown(BaseModel):
     """Markdown (discount) information for a bargain item."""
@@ -54,6 +59,11 @@ class AHBargainMarkdown(BaseModel):
     markdown_type: str = Field(default="", alias="markdownType")
     markdown_expiration_date: str = Field(default="", alias="markdownExpirationDate")
     markdown_percentage: float = Field(default=0.0, alias="markdownPercentage")
+
+    @field_validator("markdown_type", "markdown_expiration_date", mode="before")
+    @classmethod
+    def _coerce_none(cls, v: str | None) -> str:
+        return v or ""
 
 
 class AHBargainPrice(BaseModel):
@@ -67,6 +77,11 @@ class AHBargainPrice(BaseModel):
     price_was: str = Field(default="", alias="priceWas")
     price_now: str = Field(default="", alias="priceNow")
 
+    @field_validator("price_was", "price_now", mode="before")
+    @classmethod
+    def _coerce_none(cls, v: str | None) -> str:
+        return v or ""
+
 
 class AHBargainItem(BaseModel):
     """A single bargain (Laatste Kans) item as returned by the API.
@@ -76,6 +91,12 @@ class AHBargainItem(BaseModel):
 
     product: AHBargainProduct
     category_title: str = Field(default="", alias="categoryTitle")
+
+    @field_validator("category_title", mode="before")
+    @classmethod
+    def _coerce_none(cls, v: str | None) -> str:
+        return v or ""
+
     markdown: AHBargainMarkdown
     stock: int = 0
     bargain_price: AHBargainPrice = Field(alias="bargainPrice")

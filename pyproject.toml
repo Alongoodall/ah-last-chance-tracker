@@ -14,7 +14,6 @@ dependencies = [
     "apscheduler>=3.10,<4",
     "structlog>=24.0,<26",
     "python-dotenv>=1.0,<2",
-    "platformdirs>=4.0,<5",
 ]
 
 [project.optional-dependencies]

@@ -10,11 +10,11 @@ import argparse
 import asyncio
 import sys
 
-sys.path.insert(0, "backend")
+import _cli_common  # noqa: F401 — suppress logging
 
-from app.ah.client import AHClient  # noqa: E402
-from app.ah.login import extract_code_from_url, interactive_login  # noqa: E402
-from app.ah.token_store import TokenStore  # noqa: E402
+from app.ah.client import AHClient
+from app.ah.login import extract_code_from_url, interactive_login
+from app.ah.token_store import TokenStore
 
 
 async def exchange(code: str) -> None:
