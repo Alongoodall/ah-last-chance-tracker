@@ -24,7 +24,15 @@ def app(settings: Settings):
 
 @pytest.fixture()
 async def client(app) -> AsyncClient:
-    """Async HTTP client that talks directly to the ASGI app (no server needed)."""
+    """Async HTTP client that talks directly to the ASGI app (no server needed).
+
+    ``lifespan="auto"`` ensures the FastAPI startup/shutdown hooks fire, which
+    initialises the in-memory database tables before any test request runs.
+    """
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as ac:
+        async with app.router.lifespan_context(app):
+            yield ac
