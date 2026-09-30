@@ -14,14 +14,17 @@ from app.db.models import (
     Snapshot,
     Store,
 )
+from app.db.repository import BargainRepository, price_to_cents
 from app.db.session import async_session, engine
 
 __all__ = [
     "Base",
     "BargainItem",
+    "BargainRepository",
     "Product",
     "Snapshot",
     "Store",
     "async_session",
     "engine",
+    "price_to_cents",
 ]
