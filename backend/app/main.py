@@ -2,10 +2,13 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import structlog
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from app.ah.token_store import TokenStore
@@ -15,6 +18,8 @@ from app.config import Settings, settings as default_settings
 from app.db.models import Base
 from app.db.session import async_session, engine
 from app.logging import setup_logging
+
+_STATIC_DIR = Path(__file__).parent / "static"
 
 logger = structlog.stdlib.get_logger()
 
@@ -130,6 +135,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # --- Business API routes ---
     app.include_router(api_router)
+
+    # --- Dashboard (served at root) ---
+    # The root route must be registered BEFORE mounting StaticFiles at /static,
+    # so FastAPI's router handles / before the static file catch-all.
+    @app.get("/", include_in_schema=False)
+    async def dashboard():
+        """Serve the dashboard SPA."""
+        return FileResponse(_STATIC_DIR / "index.html")
+
+    # Static assets: JS, CSS → /static/app.js, /static/style.css, etc.
+    if _STATIC_DIR.exists():
+        app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
     return app
 

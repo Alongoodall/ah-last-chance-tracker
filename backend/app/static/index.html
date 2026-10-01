@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Volg Albert Heijn Laatste Kans Koopjes en bespaar op bijna-verlopen producten." />
+  <title>AH Last Chance Tracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+  <!-- ═══════════════════════════════════ HEADER ═══════════════════════════ -->
+  <header class="topbar">
+    <div class="topbar-brand">
+      <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/>
+        <line x1="3" y1="6" x2="21" y2="6"/>
+        <path d="M16 10a4 4 0 01-8 0"/>
+      </svg>
+      <span class="logo-text">Last<strong>Chance</strong></span>
+    </div>
+
+    <div class="topbar-controls">
+      <div class="store-selector-wrap">
+        <label for="store-select" class="sr-only">Winkel</label>
+        <select id="store-select" class="store-select">
+          <option value="">Laden…</option>
+        </select>
+      </div>
+
+      <div class="refresh-info" id="refresh-info">
+        <span class="refresh-dot" id="refresh-dot"></span>
+        <span id="refresh-label">–</span>
+      </div>
+
+      <button class="btn-icon" id="btn-refresh" title="Nu vernieuwen" aria-label="Vernieuwen">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+          <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ═══════════════════════════════════ FILTERS ══════════════════════════ -->
+  <div class="filter-bar">
+    <div class="search-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+      <input
+        id="search-input"
+        class="search-input"
+        type="search"
+        placeholder="Zoek op product, merk of categorie…"
+        autocomplete="off"
+        aria-label="Zoeken"
+      />
+    </div>
+
+    <div class="discount-chips" role="group" aria-label="Minimale korting">
+      <button class="chip active" data-discount="0"  id="chip-all">Alle</button>
+      <button class="chip chip-25"  data-discount="25" id="chip-25">≥ 25%</button>
+      <button class="chip chip-40"  data-discount="40" id="chip-40">≥ 40%</button>
+      <button class="chip chip-70"  data-discount="70" id="chip-70">≥ 70%</button>
+    </div>
+
+    <div class="category-wrap">
+      <select id="category-select" class="category-select" aria-label="Categorie">
+        <option value="">Alle categorieën</option>
+      </select>
+    </div>
+
+    <label class="stock-toggle">
+      <input type="checkbox" id="in-stock-toggle" checked />
+      <span>Op voorraad</span>
+    </label>
+  </div>
+
+  <!-- ═══════════════════════════════════ STATS BAR ════════════════════════ -->
+  <div class="stats-bar" id="stats-bar">
+    <span id="stats-count"></span>
+    <div class="stats-pills" id="stats-pills"></div>
+  </div>
+
+  <!-- ═══════════════════════════════════ MAIN ═════════════════════════════ -->
+  <main class="main-content" id="main-content">
+    <div class="state-message" id="state-message">
+      <div class="spinner" aria-label="Laden"></div>
+      <p>Deals laden…</p>
+    </div>
+
+    <div class="card-grid" id="card-grid" role="list"></div>
+  </main>
+
+  <!-- ═══════════════════════════════════ HISTORY PANEL ════════════════════ -->
+  <aside class="history-panel" id="history-panel" aria-label="Prijshistorie" aria-hidden="true">
+    <div class="history-header">
+      <div class="history-title-wrap">
+        <h2 class="history-title" id="history-title">Prijshistorie</h2>
+        <p class="history-subtitle" id="history-subtitle"></p>
+      </div>
+      <button class="btn-icon" id="btn-close-history" aria-label="Sluiten">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="history-current" id="history-current"></div>
+
+    <div class="chart-container">
+      <canvas id="history-chart" aria-label="Prijsgrafiek"></canvas>
+    </div>
+
+    <div class="history-table-wrap">
+      <table class="history-table" id="history-table" aria-label="Historische prijzen">
+        <thead>
+          <tr>
+            <th>Tijdstip</th>
+            <th>Prijs</th>
+            <th>Korting</th>
+            <th>Voorraad</th>
+          </tr>
+        </thead>
+        <tbody id="history-table-body"></tbody>
+      </table>
+    </div>
+  </aside>
+  <div class="overlay" id="overlay" aria-hidden="true"></div>
+
+  <!-- ═══════════════════════════════════ SCRIPTS ══════════════════════════ -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
