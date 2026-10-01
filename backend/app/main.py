@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from sqlalchemy import text
 
 from app.ah.token_store import TokenStore
+from app.api import api_router
 from app.collector import CollectorService
 from app.config import Settings, settings as default_settings
 from app.db.models import Base
@@ -126,6 +127,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             payload["database_error"] = db_error
 
         return payload
+
+    # --- Business API routes ---
+    app.include_router(api_router)
 
     return app
 
