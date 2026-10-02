@@ -76,6 +76,7 @@ query BargainItems($storeId: String!) {
       title
       brand
       salesUnitSize
+      images { url }
     }
     categoryTitle
     markdown {
@@ -87,6 +88,21 @@ query BargainItems($storeId: String!) {
     bargainPrice {
       priceWas
       priceNow
+    }
+  }
+}"""
+
+# Fetch a single store by ID via storesSearch using the store ID directly.
+# AH doesn't expose a dedicated storeById endpoint, so we filter from a
+# broader search by matching the returned store IDs.
+_STORE_BY_ID_QUERY = """\
+query StoreById($storeId: Int!) {
+  storesSearch(filter: { storeId: $storeId }, limit: 1) {
+    result {
+      id
+      name
+      storeType
+      address { street houseNumber houseNumberExtra postalCode city }
     }
   }
 }"""
@@ -412,6 +428,28 @@ class AHClient:
         logger.info("ah_auth_refresh_success")
 
     # -- Public API -------------------------------------------------------
+
+    async def get_store_by_id(self, store_id: int) -> AHStore | None:
+        """Fetch store metadata for a specific store ID.
+
+        Uses the storesSearch GraphQL query filtered by storeId.
+        Returns ``None`` if the store is not found (no exception raised).
+        Works with anonymous or authenticated tokens.
+        """
+        try:
+            raw = await self._graphql(
+                _STORE_BY_ID_QUERY,
+                {"storeId": store_id},
+                require_auth=False,
+            )
+            result = StoresSearchResult.model_validate(raw)
+            stores = result.stores_search.result
+            if stores:
+                return stores[0]
+            return None
+        except Exception as exc:
+            logger.warning("ah_get_store_by_id_failed", store_id=store_id, error=str(exc))
+            return None
 
     async def search_stores(self, postal_code: str) -> list[AHStore]:
         """Search for AH stores near a postal code.

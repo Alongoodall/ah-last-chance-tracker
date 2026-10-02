@@ -128,14 +128,35 @@ class CollectorService:
         log.info("collector_store_start")
 
         try:
+            # Fetch bargains (requires authenticated token)
             bargains = await client.get_bargains(store_id)
             log.info("collector_fetched", item_count=len(bargains))
+
+            # Fetch store metadata to populate name/address in the DB.
+            # We check first — if the store row already has a name we skip
+            # the extra API call to avoid unnecessary latency on every run.
+            async with self._session_factory() as session:
+                from sqlalchemy import select
+                from app.db.models import Store as StoreModel
+                result = await session.execute(
+                    select(StoreModel).where(StoreModel.id == store_id)
+                )
+                existing_store = result.scalar_one_or_none()
+                needs_metadata = existing_store is None or not existing_store.name
+
+            ah_store = None
+            if needs_metadata:
+                ah_store = await client.get_store_by_id(store_id)
+                if ah_store:
+                    log.info("collector_store_metadata_fetched", name=ah_store.name)
+                else:
+                    log.warning("collector_store_metadata_not_found")
 
             async with self._session_factory() as session:
                 repo = BargainRepository(session)
                 snapshot = await repo.save_snapshot(
                     store_id=store_id,
-                    ah_store=None,   # Store metadata not needed per-run
+                    ah_store=ah_store,
                     bargain_items=bargains,
                 )
                 await session.commit()

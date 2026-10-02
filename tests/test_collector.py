@@ -145,6 +145,7 @@ class TestCollectAll:
         with patch("app.collector.AHClient") as MockClient:
             mock_client = AsyncMock()
             mock_client.get_bargains = AsyncMock(return_value=items)
+            mock_client.get_store_by_id = AsyncMock(return_value=None)
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -167,6 +168,7 @@ class TestCollectAll:
         with patch("app.collector.AHClient") as MockClient:
             mock_client = AsyncMock()
             mock_client.get_bargains = AsyncMock(return_value=items)
+            mock_client.get_store_by_id = AsyncMock(return_value=None)
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -234,6 +236,7 @@ class TestCollectAll:
         with patch("app.collector.AHClient") as MockClient:
             mock_client = AsyncMock()
             mock_client.get_bargains = flaky_get_bargains
+            mock_client.get_store_by_id = AsyncMock(return_value=None)
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -252,6 +255,7 @@ class TestCollectAll:
         with patch("app.collector.AHClient") as MockClient:
             mock_client = AsyncMock()
             mock_client.get_bargains = AsyncMock(return_value=[])
+            mock_client.get_store_by_id = AsyncMock(return_value=None)
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -272,6 +276,7 @@ class TestCollectAll:
         with patch("app.collector.AHClient") as MockClient:
             mock_client = AsyncMock()
             mock_client.get_bargains = AsyncMock(return_value=items)
+            mock_client.get_store_by_id = AsyncMock(return_value=None)
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -302,6 +307,7 @@ class TestCollectOnce:
         with patch("app.collector.AHClient") as MockClient:
             mock_client = AsyncMock()
             mock_client.get_bargains = AsyncMock(return_value=items)
+            mock_client.get_store_by_id = AsyncMock(return_value=None)
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 

@@ -39,6 +39,12 @@ class AHStore(BaseModel):
 # Bargain models (from bargainItems GraphQL query)
 # ---------------------------------------------------------------------------
 
+class AHProductImage(BaseModel):
+    """A product image returned by the AH API."""
+
+    url: str
+
+
 class AHBargainProduct(BaseModel):
     """Basic product information embedded in a bargain item."""
 
@@ -46,11 +52,17 @@ class AHBargainProduct(BaseModel):
     title: str
     brand: str = ""
     sales_unit_size: str = Field(default="", alias="salesUnitSize")
+    images: list[AHProductImage] = []
 
     @field_validator("brand", "sales_unit_size", mode="before")
     @classmethod
     def _coerce_none(cls, v: str | None) -> str:
         return v or ""
+
+    @property
+    def image_url(self) -> str | None:
+        """Return the URL of the first product image, or None."""
+        return self.images[0].url if self.images else None
 
 
 class AHBargainMarkdown(BaseModel):

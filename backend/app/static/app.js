@@ -21,11 +21,30 @@ const state = {
   minDiscount:     0,
   category:        '',         // '' = all
   inStockOnly:     true,
+  favoritesOnly:   false,
   lastFetchedAt:   null,
   loading:         false,
   historyChart:    null,
   autoRefreshMs:   5 * 60 * 1000,   // 5 minutes
   autoRefreshTimer: null,
+};
+
+// ═══════════════════════════════════ FAVOURITES ══════════════════════════════
+
+const FAV_KEY = 'ah_tracker_favourites';
+
+const favourites = {
+  _ids: new Set(JSON.parse(localStorage.getItem(FAV_KEY) || '[]')),
+
+  has(productId) { return this._ids.has(productId); },
+
+  toggle(productId) {
+    if (this._ids.has(productId)) { this._ids.delete(productId); }
+    else { this._ids.add(productId); }
+    localStorage.setItem(FAV_KEY, JSON.stringify([...this._ids]));
+  },
+
+  count() { return this._ids.size; },
 };
 
 // ═══════════════════════════════════ API ═════════════════════════════════════
@@ -109,6 +128,9 @@ function applyFilters() {
     const p = item.product;
     if (!p) return false;
 
+    // Favourites-only mode
+    if (state.favoritesOnly && !favourites.has(item.product_id)) return false;
+
     // Text search
     if (q) {
       const haystack = `${p.title} ${p.brand} ${p.category} ${p.sales_unit_size}`.toLowerCase();
@@ -139,11 +161,14 @@ function renderStoreSelect() {
   sel.innerHTML = state.stores.length === 0
     ? '<option value="">Geen winkels gevonden</option>'
     : state.stores.map(s => {
-        const name = s.name || `Store ${s.id}`;
-        const city = s.city ? ` · ${s.city}` : '';
-        const snaps = s.snapshot_count > 0 ? ` (${s.snapshot_count} snapshots)` : '';
+        // Show real name+city when available, fall back to store ID
+        const hasName = s.name && s.name.trim();
+        const label = hasName
+          ? `${s.name}${s.city ? ' — ' + s.city : ''}`
+          : `Winkel #${s.id}`;
+        const snaps = s.snapshot_count > 0 ? ` (${s.snapshot_count}×)` : '';
         return `<option value="${s.id}" ${s.id === state.selectedStoreId ? 'selected' : ''}>
-          ${name}${city}${snaps}
+          ${label}${snaps}
         </option>`;
       }).join('');
 }
@@ -200,6 +225,7 @@ function buildCard(item) {
   const tier   = discountTier(disc);
   const saving = (item.price_was && item.price_now)
     ? item.price_was - item.price_now : null;
+  const isFav = favourites.has(item.product_id);
 
   // Expiry days remaining
   let expiryStr = '';
@@ -211,6 +237,18 @@ function buildCard(item) {
     else if (days === 1) expiryStr = '📅 Verloopt morgen';
     else if (days > 0) expiryStr = `📅 THT: ${days}d`;
   }
+
+  // Product image — graceful fallback to a coloured tile
+  const imgHtml = p.image_url
+    ? `<img
+        class="card-img"
+        src="${p.image_url}"
+        alt="${p.title.replace(/"/g, '&quot;')}"
+        loading="lazy"
+        onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"
+      />
+      <div class="card-img-fallback" style="display:none"></div>`
+    : `<div class="card-img-fallback"></div>`;
 
   const animDelay = `animation-delay: ${(Math.random() * 0.15).toFixed(2)}s`;
 
@@ -224,26 +262,37 @@ function buildCard(item) {
     style="${animDelay}"
     aria-label="${p.title} – ${formatDiscount(disc)} korting"
   >
-    <span class="card-badge badge-${tier}">${formatDiscount(disc)}</span>
-
-    <div class="card-category">${p.category || '–'}</div>
-    <h3 class="card-title">${p.title}</h3>
-    <div class="card-brand">${p.brand || '–'}</div>
-
-    <div class="card-prices">
-      <span class="price-now">${formatEuro(item.price_now)}</span>
-      ${item.price_was ? `<span class="price-was">${formatEuro(item.price_was)}</span>` : ''}
-      ${saving ? `<span class="price-saving">−${formatEuro(saving)}</span>` : ''}
+    <div class="card-img-wrap">
+      ${imgHtml}
+      <span class="card-badge badge-${tier}">${formatDiscount(disc)}</span>
+      <button
+        class="card-fav ${isFav ? 'active' : ''}"
+        data-fav-id="${item.product_id}"
+        aria-label="${isFav ? 'Verwijder uit favorieten' : 'Voeg toe aan favorieten'}"
+        title="${isFav ? 'Favoriet verwijderen' : 'Als favoriet markeren'}"
+      >★</button>
     </div>
 
-    <div class="card-footer">
-      <span class="card-unit">${p.sales_unit_size || ''}</span>
-      <span class="stock-badge ${stockClass(item.stock)}">
-        ${stockLabel(item.stock)}
-      </span>
-    </div>
+    <div class="card-body">
+      <div class="card-category">${p.category || '–'}</div>
+      <h3 class="card-title">${p.title}</h3>
+      <div class="card-brand">${p.brand || '–'}</div>
 
-    ${expiryStr ? `<div class="expiry-tag">${expiryStr}</div>` : ''}
+      <div class="card-prices">
+        <span class="price-now">${formatEuro(item.price_now)}</span>
+        ${item.price_was ? `<span class="price-was">${formatEuro(item.price_was)}</span>` : ''}
+        ${saving ? `<span class="price-saving">−${formatEuro(saving)}</span>` : ''}
+      </div>
+
+      <div class="card-footer">
+        <span class="card-unit">${p.sales_unit_size || ''}</span>
+        <span class="stock-badge ${stockClass(item.stock)}">
+          ${stockLabel(item.stock)}
+        </span>
+      </div>
+
+      ${expiryStr ? `<div class="expiry-tag">${expiryStr}</div>` : ''}
+    </div>
   </article>`;
 }
 
@@ -506,6 +555,15 @@ function scheduleAutoRefresh() {
 // Update the "X min ago" label every 30 seconds
 setInterval(renderRefresh, 30_000);
 
+// Update the favourites chip label and active state
+function _updateFavChip() {
+  const btn = document.getElementById('chip-fav');
+  if (!btn) return;
+  const count = favourites.count();
+  btn.textContent = count > 0 ? `★ Favorieten (${count})` : '★ Favorieten';
+  btn.setAttribute('aria-pressed', state.favoritesOnly ? 'true' : 'false');
+}
+
 // ═══════════════════════════════════ EVENTS ══════════════════════════════════
 
 function wireEvents() {
@@ -532,17 +590,39 @@ function wireEvents() {
     }, 150);
   });
 
-  // Discount chips
-  document.querySelectorAll('.chip').forEach(chip => {
+  // Discount chips (and favourites chip)
+  document.querySelectorAll('.chip[data-discount]').forEach(chip => {
     chip.addEventListener('click', () => {
       document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
       chip.classList.add('active');
       state.minDiscount = parseInt(chip.dataset.discount, 10) || 0;
+      state.favoritesOnly = false;
+      _updateFavChip();
       applyFilters();
       renderCards();
       renderStats();
     });
   });
+
+  // Favourites chip — independent of discount chips
+  const favChip = document.getElementById('chip-fav');
+  if (favChip) {
+    favChip.addEventListener('click', () => {
+      state.favoritesOnly = !state.favoritesOnly;
+      favChip.classList.toggle('active', state.favoritesOnly);
+      // Deactivate discount chips when entering fav-only mode
+      if (state.favoritesOnly) {
+        document.querySelectorAll('.chip[data-discount]').forEach(c => c.classList.remove('active'));
+      } else {
+        document.getElementById('chip-all').classList.add('active');
+      }
+      _updateFavChip();
+      applyFilters();
+      renderCards();
+      renderStats();
+    });
+    _updateFavChip(); // Set initial count
+  }
 
   // Category
   document.getElementById('category-select').addEventListener('change', e => {
@@ -562,6 +642,28 @@ function wireEvents() {
 
   // Card clicks (event delegation)
   document.getElementById('card-grid').addEventListener('click', e => {
+    // Favourite star button — toggle without opening history panel
+    const favBtn = e.target.closest('.card-fav');
+    if (favBtn) {
+      e.stopPropagation();
+      const productId = parseInt(favBtn.dataset.favId, 10);
+      favourites.toggle(productId);
+      // Update the button in place without re-rendering everything
+      const isNowFav = favourites.has(productId);
+      favBtn.classList.toggle('active', isNowFav);
+      favBtn.setAttribute('aria-label', isNowFav ? 'Verwijder uit favorieten' : 'Voeg toe aan favorieten');
+      favBtn.title = isNowFav ? 'Favoriet verwijderen' : 'Als favoriet markeren';
+      // If in favourites-only mode, remove the card immediately
+      if (state.favoritesOnly && !isNowFav) {
+        favBtn.closest('.card').remove();
+        state.filtered = state.filtered.filter(i => i.product_id !== productId);
+        renderStats();
+      }
+      // Update favourites chip count
+      _updateFavChip();
+      return;
+    }
+
     const card = e.target.closest('.card');
     if (!card) return;
     openHistoryPanel(

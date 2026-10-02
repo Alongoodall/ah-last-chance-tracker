@@ -218,6 +218,9 @@ class BargainRepository:
                 db_product.category = ah_item.category_title
                 db_product.sales_unit_size = p.sales_unit_size
                 db_product.last_seen_at = now
+                # Always update image_url if a fresh one is available
+                if p.image_url is not None:
+                    db_product.image_url = p.image_url
             else:
                 new_product = Product(
                     id=p.id,
@@ -225,6 +228,7 @@ class BargainRepository:
                     brand=p.brand,
                     category=ah_item.category_title,
                     sales_unit_size=p.sales_unit_size,
+                    image_url=p.image_url,
                     first_seen_at=now,
                     last_seen_at=now,
                 )

@@ -105,6 +105,8 @@ class Product(Base):
     brand: Mapped[str] = mapped_column(String(200), nullable=False, default="")
     category: Mapped[str] = mapped_column(String(200), nullable=False, default="")
     sales_unit_size: Mapped[str] = mapped_column(String(100), nullable=False, default="")
+    image_url: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None)
+    """URL of the first product image from the AH API. May be None for older records."""
 
     first_seen_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now_utc
