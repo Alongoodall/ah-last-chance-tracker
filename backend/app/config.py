@@ -12,9 +12,17 @@ class Settings(BaseSettings):
     Values are read from environment variables (or a .env file).
     Every setting has a sensible default so the app starts out of the box.
 
-    Key variables for the collector:
-        AH_STORE_IDS=2203,1812   (comma-separated list of store IDs to collect)
-        COLLECTION_INTERVAL_MINUTES=10
+    Key variables:
+        AH_STORE_IDS=2203,1812
+            Comma-separated store IDs to collect.
+
+        AH_STORE_POSTAL_CODES=2203:1091GH,1812:1234AB
+            Optional: postal codes per store so the collector can look up
+            the store name/address from the AH API automatically.
+
+        AH_STORE_NAMES=2203:AH Eerste Oosterparkstraat,1812:AH Centrum
+            Optional: manual display-name overrides per store.
+            Takes precedence over whatever the API returns.
     """
 
     # --- App ---
@@ -25,11 +33,24 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///data/ah_tracker.db"
 
     # --- AH Collector ---
-    # Comma-separated store IDs, e.g. "2203,1812,1315"
-    # Set via AH_STORE_IDS env var or in .env
     ah_store_ids: str = ""
+    ah_store_postal_codes: str = ""   # "storeId:postalCode,..."
+    ah_store_names: str = ""          # "storeId:Display Name,..."
 
     collection_interval_minutes: int = 10
+
+    # --- Notifications ---
+    # ntfy.sh (or self-hosted ntfy) push notifications.
+    # Set to your topic URL, e.g. https://ntfy.sh/my-ah-tracker-topic
+    ah_notify_url: str = ""
+
+    # Optional email via SMTP (all must be set to enable email)
+    ah_smtp_host:     str = ""
+    ah_smtp_port:     int = 587
+    ah_smtp_user:     str = ""
+    ah_smtp_password: str = ""
+    ah_smtp_from:     str = ""
+    ah_smtp_to:       str = ""
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
@@ -42,16 +63,48 @@ class Settings(BaseSettings):
 
     @property
     def store_ids(self) -> list[int]:
-        """Return store IDs as a parsed list of ints.
-
-        Returns an empty list if AH_STORE_IDS is not set.
-
-        Example:
-            AH_STORE_IDS=2203,1812  →  [2203, 1812]
-        """
+        """Return store IDs as a parsed list of ints."""
         if not self.ah_store_ids.strip():
             return []
         return [int(s.strip()) for s in self.ah_store_ids.split(",") if s.strip()]
+
+    @property
+    def store_postal_codes(self) -> dict[int, str]:
+        """Return {store_id: postal_code} mapping.
+
+        Example:
+            AH_STORE_POSTAL_CODES=2203:1091GH,1812:1234AB
+            → {2203: '1091GH', 1812: '1234AB'}
+        """
+        result: dict[int, str] = {}
+        for part in self.ah_store_postal_codes.split(","):
+            part = part.strip()
+            if ":" in part:
+                sid, pc = part.split(":", 1)
+                try:
+                    result[int(sid.strip())] = pc.strip()
+                except ValueError:
+                    pass
+        return result
+
+    @property
+    def store_names(self) -> dict[int, str]:
+        """Return {store_id: display_name} mapping (manual overrides).
+
+        Example:
+            AH_STORE_NAMES=2203:AH Eerste Oosterparkstraat,1812:AH Centrum
+            → {2203: 'AH Eerste Oosterparkstraat', 1812: 'AH Centrum'}
+        """
+        result: dict[int, str] = {}
+        for part in self.ah_store_names.split(","):
+            part = part.strip()
+            if ":" in part:
+                sid, name = part.split(":", 1)
+                try:
+                    result[int(sid.strip())] = name.strip()
+                except ValueError:
+                    pass
+        return result
 
 
 # Module-level singleton — import this everywhere instead of instantiating

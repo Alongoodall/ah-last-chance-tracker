@@ -68,6 +68,8 @@ async def main(store_ids: list[int], verbose: bool) -> int:
         store_ids=store_ids,
         token_store=token_store,
         session_factory=async_session,
+        postal_codes=settings.store_postal_codes,
+        name_overrides=settings.store_names,
     )
 
     print(f"\nCollecting bargains for {len(store_ids)} store(s): {store_ids}")

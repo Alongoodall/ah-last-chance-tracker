@@ -76,7 +76,6 @@ query BargainItems($storeId: String!) {
       title
       brand
       salesUnitSize
-      images { url }
     }
     categoryTitle
     markdown {

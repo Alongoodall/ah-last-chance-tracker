@@ -34,6 +34,11 @@ from app.ah import AHAuthenticationError, AHError
 from app.ah.token_store import TokenStore
 from app.db.models import Snapshot
 from app.db.repository import BargainRepository
+from app.notifier import (
+    AlertDetector,
+    NotifierService,
+    fetch_snapshot_items,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -72,12 +77,20 @@ class CollectorService:
         store_ids: list[int],
         token_store: TokenStore,
         session_factory: async_sessionmaker[AsyncSession],
+        *,
+        postal_codes: dict[int, str] | None = None,
+        name_overrides: dict[int, str] | None = None,
+        notifier: NotifierService | None = None,
     ) -> None:
         if not store_ids:
             logger.warning("collector_no_stores_configured")
         self._store_ids = store_ids
         self._token_store = token_store
         self._session_factory = session_factory
+        self._postal_codes: dict[int, str] = postal_codes or {}
+        self._name_overrides: dict[int, str] = name_overrides or {}
+        self._notifier = notifier
+        self._detector = AlertDetector()
 
     @property
     def store_ids(self) -> list[int]:
@@ -132,9 +145,9 @@ class CollectorService:
             bargains = await client.get_bargains(store_id)
             log.info("collector_fetched", item_count=len(bargains))
 
-            # Fetch store metadata to populate name/address in the DB.
-            # We check first — if the store row already has a name we skip
-            # the extra API call to avoid unnecessary latency on every run.
+            # --- Store metadata ---
+            # Only fetch from API when the store row has no name yet.
+            # We use search_stores (postal-code based) if a postal code is configured.
             async with self._session_factory() as session:
                 from sqlalchemy import select
                 from app.db.models import Store as StoreModel
@@ -145,12 +158,49 @@ class CollectorService:
                 needs_metadata = existing_store is None or not existing_store.name
 
             ah_store = None
-            if needs_metadata:
-                ah_store = await client.get_store_by_id(store_id)
-                if ah_store:
-                    log.info("collector_store_metadata_fetched", name=ah_store.name)
-                else:
-                    log.warning("collector_store_metadata_not_found")
+            if needs_metadata and store_id in self._postal_codes:
+                postal_code = self._postal_codes[store_id]
+                try:
+                    stores = await client.search_stores(postal_code)
+                    # Pick the matching store ID from results
+                    ah_store = next((s for s in stores if s.id == store_id), None)
+                    if ah_store:
+                        log.info("collector_store_metadata_fetched", name=ah_store.name)
+                    else:
+                        log.warning(
+                            "collector_store_not_in_search_results",
+                            postal_code=postal_code,
+                        )
+                except Exception as exc:
+                    log.warning("collector_store_search_failed", error=str(exc))
+
+            # Apply name override (from AH_STORE_NAMES) regardless of API result.
+            # If we got an AHStore from the API we patch its name in-place;
+            # if not, we create a minimal store object just to carry the override name.
+            if store_id in self._name_overrides:
+                override_name = self._name_overrides[store_id]
+                if ah_store is not None:
+                    # Patch name on existing AHStore
+                    object.__setattr__(ah_store, 'name', override_name) if hasattr(ah_store, '__setattr__') else None
+                    try:
+                        ah_store.name = override_name
+                    except Exception:
+                        pass
+                elif needs_metadata:
+                    # Build a minimal AHStore just to carry the display name
+                    from app.ah.models import AHStore, AHStoreAddress
+                    ah_store = AHStore(
+                        id=store_id,
+                        name=override_name,
+                        storeType="AH",
+                        address=AHStoreAddress(
+                            street="",
+                            houseNumber="",
+                            postalCode="",
+                            city="",
+                        ),
+                    )
+                log.info("collector_store_name_override_applied", name=override_name)
 
             async with self._session_factory() as session:
                 repo = BargainRepository(session)
@@ -166,6 +216,10 @@ class CollectorService:
                 snapshot_id=snapshot.id,
                 item_count=snapshot.item_count,
             )
+
+            # Fire alerts (best-effort — errors are swallowed with a warning)
+            await self._notify_if_needed(store_id, snapshot)
+
             return CollectionResult(store_id=store_id, snapshot=snapshot)
 
         except AHAuthenticationError as exc:
@@ -179,3 +233,55 @@ class CollectorService:
         except Exception as exc:
             log.exception("collector_unexpected_error", error=str(exc))
             return CollectionResult(store_id=store_id, error=exc)
+
+    async def _notify_if_needed(
+        self, store_id: int, snapshot: Snapshot
+    ) -> None:
+        """Detect alert events and dispatch them.
+
+        Fetches the *previous* snapshot for this store (if any) from the DB,
+        runs the detector, and dispatches via the configured notifier.
+        Errors are logged as warnings so they never interrupt collection.
+        """
+        if self._notifier is None or not self._notifier.has_channels:
+            return
+
+        try:
+            from sqlalchemy import select
+            from app.db.models import Snapshot as SnapModel
+
+            async with self._session_factory() as session:
+                # Find the snapshot immediately before this one for the same store
+                prev_result = await session.execute(
+                    select(SnapModel)
+                    .where(
+                        SnapModel.store_id == store_id,
+                        SnapModel.id < snapshot.id,
+                    )
+                    .order_by(SnapModel.id.desc())
+                    .limit(1)
+                )
+                prev_snap = prev_result.scalar_one_or_none()
+
+                curr_items = await fetch_snapshot_items(session, snapshot.id)
+                prev_items = (
+                    await fetch_snapshot_items(session, prev_snap.id)
+                    if prev_snap
+                    else []
+                )
+
+            events = self._detector.compare(prev_items, curr_items, store_id)
+            if events:
+                logger.info(
+                    "collector_alerts_detected",
+                    store_id=store_id,
+                    count=len(events),
+                )
+            await self._notifier.dispatch_all(events)
+
+        except Exception as exc:
+            logger.warning(
+                "collector_notify_failed",
+                store_id=store_id,
+                error=str(exc),
+            )

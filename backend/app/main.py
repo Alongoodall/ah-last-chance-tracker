@@ -18,6 +18,7 @@ from app.config import Settings, settings as default_settings
 from app.db.models import Base
 from app.db.session import async_session, engine
 from app.logging import setup_logging
+from app.notifier import make_notifier_from_settings
 
 _STATIC_DIR = Path(__file__).parent / "static"
 
@@ -30,6 +31,9 @@ def _make_collector(settings: Settings) -> CollectorService:
         store_ids=settings.store_ids,
         token_store=TokenStore(),
         session_factory=async_session,
+        postal_codes=settings.store_postal_codes,
+        name_overrides=settings.store_names,
+        notifier=make_notifier_from_settings(settings),
     )
 
 
