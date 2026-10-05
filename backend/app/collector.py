@@ -34,6 +34,7 @@ from app.ah import AHAuthenticationError, AHError
 from app.ah.token_store import TokenStore
 from app.db.models import Snapshot
 from app.db.repository import BargainRepository
+from app.event_bus import EventBus
 from app.notifier import (
     AlertDetector,
     NotifierService,
@@ -81,6 +82,7 @@ class CollectorService:
         postal_codes: dict[int, str] | None = None,
         name_overrides: dict[int, str] | None = None,
         notifier: NotifierService | None = None,
+        event_bus: EventBus | None = None,
     ) -> None:
         if not store_ids:
             logger.warning("collector_no_stores_configured")
@@ -90,6 +92,7 @@ class CollectorService:
         self._postal_codes: dict[int, str] = postal_codes or {}
         self._name_overrides: dict[int, str] = name_overrides or {}
         self._notifier = notifier
+        self._event_bus = event_bus
         self._detector = AlertDetector()
 
     @property
@@ -216,6 +219,18 @@ class CollectorService:
                 snapshot_id=snapshot.id,
                 item_count=snapshot.item_count,
             )
+
+            # Publish SSE event so connected browsers refresh immediately
+            if self._event_bus is not None:
+                await self._event_bus.publish(
+                    "snapshot_ready",
+                    {
+                        "store_id":    store_id,
+                        "snapshot_id": snapshot.id,
+                        "item_count":  snapshot.item_count,
+                        "fetched_at":  snapshot.fetched_at.isoformat(),
+                    },
+                )
 
             # Fire alerts (best-effort — errors are swallowed with a warning)
             await self._notify_if_needed(store_id, snapshot)

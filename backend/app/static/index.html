@@ -36,6 +36,12 @@
         <span id="refresh-label">–</span>
       </div>
 
+      <!-- SSE live indicator -->
+      <div class="sse-status" id="sse-status" title="Live verbinding">
+        <span class="sse-dot" id="sse-dot"></span>
+        <span class="sse-label" id="sse-label">Live</span>
+      </div>
+
       <button class="btn-icon" id="btn-refresh" title="Nu vernieuwen" aria-label="Vernieuwen">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
@@ -44,6 +50,9 @@
       </button>
     </div>
   </header>
+
+  <!-- Toast notification container -->
+  <div id="toast-container" aria-live="polite" aria-atomic="true"></div>
 
   <!-- ═══════════════════════════════════ FILTERS ══════════════════════════ -->
   <div class="filter-bar">

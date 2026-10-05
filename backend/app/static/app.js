@@ -25,8 +25,10 @@ const state = {
   lastFetchedAt:   null,
   loading:         false,
   historyChart:    null,
-  autoRefreshMs:   5 * 60 * 1000,   // 5 minutes
+  autoRefreshMs:   5 * 60 * 1000,   // 5 minutes (fallback when SSE is down)
   autoRefreshTimer: null,
+  sseSource:       null,            // active EventSource, or null
+  sseConnected:    false,
 };
 
 // ═══════════════════════════════════ FAVOURITES ══════════════════════════════
@@ -544,16 +546,118 @@ async function loadBargains() {
 
 // ═══════════════════════════════════ AUTO REFRESH ════════════════════════════
 
+/**
+ * Polling fallback — only used when the SSE connection is down.
+ * Once SSE reconnects, new snapshots arrive instantly and polling
+ * is cancelled until the next disconnect.
+ */
 function scheduleAutoRefresh() {
   if (state.autoRefreshTimer) clearTimeout(state.autoRefreshTimer);
   state.autoRefreshTimer = setTimeout(async () => {
     await loadBargains();
-    scheduleAutoRefresh();
+    if (!state.sseConnected) scheduleAutoRefresh();  // only reschedule if still offline
   }, state.autoRefreshMs);
+}
+
+function cancelAutoRefresh() {
+  if (state.autoRefreshTimer) {
+    clearTimeout(state.autoRefreshTimer);
+    state.autoRefreshTimer = null;
+  }
 }
 
 // Update the "X min ago" label every 30 seconds
 setInterval(renderRefresh, 30_000);
+
+// ═══════════════════════════════════ SSE ═════════════════════════════════════
+
+/** Show a brief toast notification. */
+function showToast(message) {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.innerHTML = `<span class="toast-dot"></span><span>${message}</span>`;
+  container.appendChild(toast);
+
+  const remove = () => {
+    toast.classList.add('leaving');
+    toast.addEventListener('animationend', () => toast.remove(), { once: true });
+  };
+  setTimeout(remove, 3500);
+}
+
+/** Update the SSE indicator dot + label. */
+function setSseStatus(status) {
+  // status: 'connected' | 'reconnecting' | 'disconnected'
+  const dot   = document.getElementById('sse-dot');
+  const label = document.getElementById('sse-label');
+  if (!dot || !label) return;
+
+  dot.className = `sse-dot ${status}`;
+  const labels = {
+    connected:    'Live',
+    reconnecting: 'Verbinden…',
+    disconnected: 'Offline',
+  };
+  label.textContent = labels[status] ?? status;
+  state.sseConnected = (status === 'connected');
+}
+
+/** Open the SSE connection. Reconnects automatically on error. */
+function startSSE() {
+  if (!window.EventSource) {
+    // Browser doesn't support SSE — fall back to polling only
+    setSseStatus('disconnected');
+    scheduleAutoRefresh();
+    return;
+  }
+
+  // Don't open a second connection
+  if (state.sseSource) {
+    state.sseSource.close();
+    state.sseSource = null;
+  }
+
+  setSseStatus('reconnecting');
+
+  const es = new EventSource('/api/events');
+  state.sseSource = es;
+
+  es.addEventListener('open', () => {
+    setSseStatus('connected');
+    // SSE is live — cancel the polling fallback
+    cancelAutoRefresh();
+  });
+
+  es.addEventListener('snapshot_ready', (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      // Only re-fetch if this snapshot is for the store we're currently viewing
+      if (data.store_id === state.selectedStoreId) {
+        loadBargains().then(() => {
+          showToast(`✓ Bijgewerkt — ${data.item_count} deal${data.item_count !== 1 ? 's' : ''}`);
+        });
+      } else {
+        // Different store: just update the store list (snapshot_count changes)
+        loadStores();
+      }
+    } catch (err) {
+      console.warn('SSE parse error:', err);
+    }
+  });
+
+  // 'ping' events are keepalive — no action needed
+  es.addEventListener('ping', () => {});
+
+  es.addEventListener('error', () => {
+    setSseStatus('reconnecting');
+    // EventSource will attempt automatic reconnection;
+    // start polling in the meantime so we're not stuck waiting
+    scheduleAutoRefresh();
+  });
+}
 
 // Update the favourites chip label and active state
 function _updateFavChip() {
@@ -693,7 +797,8 @@ async function init() {
   wireEvents();
   await loadStores();
   await loadBargains();
-  scheduleAutoRefresh();
+  // Start SSE — it cancels polling when connected, falls back to polling on error
+  startSSE();
 }
 
 document.addEventListener('DOMContentLoaded', init);

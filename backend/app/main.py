@@ -17,6 +17,7 @@ from app.collector import CollectorService
 from app.config import Settings, settings as default_settings
 from app.db.models import Base
 from app.db.session import async_session, engine
+from app.event_bus import EventBus
 from app.logging import setup_logging
 from app.notifier import make_notifier_from_settings
 
@@ -25,7 +26,10 @@ _STATIC_DIR = Path(__file__).parent / "static"
 logger = structlog.stdlib.get_logger()
 
 
-def _make_collector(settings: Settings) -> CollectorService:
+def _make_collector(
+    settings: Settings,
+    event_bus: EventBus,
+) -> CollectorService:
     """Build a CollectorService from the current settings."""
     return CollectorService(
         store_ids=settings.store_ids,
@@ -34,6 +38,7 @@ def _make_collector(settings: Settings) -> CollectorService:
         postal_codes=settings.store_postal_codes,
         name_overrides=settings.store_names,
         notifier=make_notifier_from_settings(settings),
+        event_bus=event_bus,
     )
 
 
@@ -41,6 +46,10 @@ def _make_collector(settings: Settings) -> CollectorService:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Startup / shutdown lifecycle hook."""
     logger.info("application_startup", app_name=app.title)
+
+    # 0. Create the event bus (shared across all requests)
+    event_bus = EventBus()
+    app.state.event_bus = event_bus
 
     # 1. Ensure DB tables exist (idempotent alongside Alembic)
     async with engine.begin() as conn:
@@ -52,7 +61,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     scheduler: AsyncIOScheduler | None = None
 
     if settings.store_ids:
-        collector = _make_collector(settings)
+        collector = _make_collector(settings, event_bus)
         scheduler = AsyncIOScheduler()
         scheduler.add_job(
             collector.collect_all,
