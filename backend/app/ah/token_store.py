@@ -33,9 +33,14 @@ _APP_NAME = "ah-last-chance-tracker"
 def _default_config_dir() -> Path:
     """Return the config directory for token storage.
 
-    Uses ``~/.config/<app>`` following the XDG convention (matching
-    ``appie-go``'s behaviour).  Respects ``$XDG_CONFIG_HOME`` if set.
+    Priority:
+    1. ``$AH_TOKEN_DIR`` — set explicitly (e.g. by Docker at ``/config/tokens``)
+    2. ``$XDG_CONFIG_HOME/<app>`` — XDG standard
+    3. ``~/.config/<app>`` — fallback
     """
+    ah_dir = os.environ.get("AH_TOKEN_DIR")
+    if ah_dir:
+        return Path(ah_dir)
     xdg = os.environ.get("XDG_CONFIG_HOME")
     if xdg:
         return Path(xdg) / _APP_NAME

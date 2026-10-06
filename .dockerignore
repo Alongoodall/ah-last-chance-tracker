@@ -1,0 +1,56 @@
+# ─── Docker build context exclusions ─────────────────────────────────────────
+# Keeps the image lean by excluding files the container doesn't need.
+
+# Python bytecode and virtual environment
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+
+# Environment files (injected at runtime via env_file / -e)
+.env
+*.env.*
+
+# Auth tokens — never bake credentials into an image
+tokens.json
+*.tokens.json
+
+# Test & lint artefacts
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+tests/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Git history (not needed at runtime)
+.git/
+.gitignore
+
+# Local data (mounted as a volume at runtime)
+data/
+
+# Notebooks (not needed in production)
+notebooks/
+
+# Frontend scaffolding
+frontend/
+
+# Docker files themselves (no need to embed)
+Dockerfile
+docker-compose.yml
+docker/
+
+# Documentation
+README.md
+*.md

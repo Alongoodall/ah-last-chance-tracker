@@ -1,0 +1,57 @@
+# ─── AH Last Chance Tracker — Docker Compose ────────────────────────────────
+#
+# Quick start:
+#   1. cp .env.example .env          # fill in AH_STORE_IDS at minimum
+#   2. docker compose up -d          # start in background
+#   3. docker compose exec tracker python scripts/ah_login.py   # authenticate
+#   4. open http://localhost:8000    # view dashboard
+#
+# To update after a code change:
+#   docker compose up -d --build
+#
+# To view logs:
+#   docker compose logs -f
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  tracker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ah-last-chance-tracker:latest
+    container_name: ah-tracker
+
+    restart: unless-stopped
+
+    ports:
+      - "${TRACKER_PORT:-8000}:8000"
+
+    env_file:
+      - .env
+
+    environment:
+      # Override the DB path so it lands in the mounted volume
+      DATABASE_URL: "sqlite+aiosqlite:////app/data/ah_tracker.db"
+      # Token store location — mapped to the host's config dir
+      AH_TOKEN_DIR: "/config/tokens"
+
+    volumes:
+      # SQLite database — persisted on the host
+      - ./data:/app/data
+
+      # Auth tokens — shared with the host so `ah_login.py` works from
+      # either inside the container or directly on the host.
+      - "${AH_TOKEN_HOST_DIR:-${HOME}/.config/ah-last-chance-tracker}:/config/tokens"
+
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
