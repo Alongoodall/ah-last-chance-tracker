@@ -31,8 +31,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.ah.client import AHClient
 from app.ah import AHAuthenticationError, AHError
+from app.ah.models import AHProductImage
 from app.ah.token_store import TokenStore
-from app.db.models import Snapshot
+from app.db.models import Product, Snapshot
 from app.db.repository import BargainRepository
 from app.event_bus import EventBus
 from app.notifier import (
@@ -83,7 +84,10 @@ class CollectorService:
         name_overrides: dict[int, str] | None = None,
         notifier: NotifierService | None = None,
         event_bus: EventBus | None = None,
+        retention_days: int = 30,
     ) -> None:
+        if retention_days < 0:
+            raise ValueError("retention_days must be non-negative")
         if not store_ids:
             logger.warning("collector_no_stores_configured")
         self._store_ids = store_ids
@@ -93,6 +97,7 @@ class CollectorService:
         self._name_overrides: dict[int, str] = name_overrides or {}
         self._notifier = notifier
         self._event_bus = event_bus
+        self._retention_days = retention_days
         self._detector = AlertDetector()
 
     @property
@@ -117,6 +122,8 @@ class CollectorService:
                 result = await self._collect_one(client, store_id)
                 results.append(result)
 
+        await self._prune_old_snapshots()
+
         ok = sum(1 for r in results if r.ok)
         logger.info(
             "collector_cycle_done",
@@ -132,6 +139,19 @@ class CollectorService:
             return await self._collect_one(client, store_id)
 
     # -- Private helpers -----------------------------------------------------
+
+    async def _prune_old_snapshots(self) -> None:
+        """Run housekeeping once per cycle without disrupting collection results."""
+        if self._retention_days == 0:
+            return
+        try:
+            async with self._session_factory() as session, session.begin():
+                deleted = await BargainRepository(session).prune_old_snapshots(
+                    self._retention_days
+                )
+            logger.info("collector_snapshots_pruned", deleted=deleted)
+        except Exception as exc:
+            logger.exception("collector_pruning_failed", error=str(exc))
 
     async def _collect_one(
         self, client: AHClient, store_id: int
@@ -159,6 +179,29 @@ class CollectorService:
                 )
                 existing_store = result.scalar_one_or_none()
                 needs_metadata = existing_store is None or not existing_store.name
+
+                # Persisted image URLs are a cache, so subsequent polls do not
+                # need to look up every product again.
+                product_ids = [item.product.id for item in bargains]
+                cached = await session.execute(
+                    select(Product).where(Product.id.in_(product_ids))
+                )
+                cached_products = {product.id: product for product in cached.scalars()}
+                for item in bargains:
+                    product = item.product
+                    previous = cached_products.get(product.id)
+                    if previous is None:
+                        continue
+                    same_webshop_id = (
+                        product.webshop_id is None or previous.webshop_id is None
+                        or product.webshop_id == previous.webshop_id
+                    )
+                    if product.webshop_id is None:
+                        product.webshop_id = previous.webshop_id
+                    if not product.image_url and previous.image_url and same_webshop_id:
+                        product.images = [AHProductImage(url=previous.image_url)]
+
+            await client.enrich_product_images(bargains)
 
             ah_store = None
             if needs_metadata and store_id in self._postal_codes:

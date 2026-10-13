@@ -38,6 +38,7 @@ from app.ah import (
 )
 from app.ah.models import (
     AHBargainItem,
+    AHProductImage,
     AHStore,
     BargainItemsResult,
     StoresSearchResult,
@@ -76,6 +77,7 @@ query BargainItems($storeId: String!) {
       title
       brand
       salesUnitSize
+      webshopId
     }
     categoryTitle
     markdown {
@@ -90,6 +92,15 @@ query BargainItems($storeId: String!) {
     }
   }
 }"""
+
+# Some AH API versions omit webshopId on Product. Keep bargain collection
+# working on those versions; the existing id can be used for REST lookups.
+_BARGAIN_ITEMS_QUERY_WITHOUT_WEBSHOP_ID = _BARGAIN_ITEMS_QUERY.replace(
+    "      webshopId\n", "",
+)
+
+_PRODUCT_CARDS_PATH = "/mobile-services/product/search/v2/products"
+_IMAGE_BATCH_SIZE = 50
 
 # Fetch a single store by ID via storesSearch using the store ID directly.
 # AH doesn't expose a dedicated storeById endpoint, so we filter from a
@@ -143,6 +154,9 @@ class AHClient:
         self._access_token: str | None = None
         self._refresh_token: str | None = None
         self._http: httpx.AsyncClient | None = None
+        self._supports_webshop_id = True
+        self._image_cache: dict[int, list[AHProductImage]] = {}
+        self._resolved_webshop_ids: set[int] = set()
 
     # -- Context manager --------------------------------------------------
 
@@ -496,11 +510,7 @@ class AHClient:
             has no discounted items (e.g. outside opening hours or all
             items sold out).
         """
-        variables: dict[str, Any] = {"storeId": str(store_id)}
-
-        raw = await self._graphql(
-            _BARGAIN_ITEMS_QUERY, variables, require_auth=True,
-        )
+        raw = await self._get_bargains_data(store_id)
 
         result = BargainItemsResult.model_validate(raw)
         bargains = result.bargain_items
@@ -521,10 +531,110 @@ class AHClient:
         Same request as :meth:`get_bargains` but returns the unprocessed
         GraphQL ``data`` dict.
         """
-        variables: dict[str, Any] = {"storeId": str(store_id)}
-        return await self._graphql(
-            _BARGAIN_ITEMS_QUERY, variables, require_auth=True,
+        return await self._get_bargains_data(store_id)
+
+    async def _get_bargains_data(self, store_id: int) -> dict[str, Any]:
+        query = (
+            _BARGAIN_ITEMS_QUERY if self._supports_webshop_id
+            else _BARGAIN_ITEMS_QUERY_WITHOUT_WEBSHOP_ID
         )
+        try:
+            return await self._graphql(query, {"storeId": str(store_id)}, require_auth=True)
+        except AHAPIError as exc:
+            message = str(exc)
+            unsupported_field = (
+                isinstance(exc, AHGraphQLError) or exc.status_code == 400
+            ) and "webshopId" in message and any(
+                marker in message
+                for marker in ("Cannot query field", "FieldUndefined", "not defined")
+            )
+            if not self._supports_webshop_id or not unsupported_field:
+                raise
+            self._supports_webshop_id = False
+            logger.info("ah_webshop_id_query_unavailable")
+            return await self._graphql(
+                _BARGAIN_ITEMS_QUERY_WITHOUT_WEBSHOP_ID,
+                {"storeId": str(store_id)}, require_auth=True,
+            )
+
+    async def enrich_product_images(self, bargains: list[AHBargainItem]) -> None:
+        """Resolve actual DAM URLs through the batch product-card REST API.
+
+        Called before persistence, after reusing images already in the DB.
+        Requests are sequential and deduplicated across stores in this client.
+        Image failures never prevent saving the prices and stock we fetched.
+        Endpoint/response shape: appie-go products.go GetProductsByIDs.
+        """
+        products = [item.product for item in bargains if not item.product.image_url]
+        lookup_ids = list(dict.fromkeys(
+            product.webshop_id or product.id for product in products
+            if (product.webshop_id or product.id) > 0
+        ))
+        missing = [product_id for product_id in lookup_ids if product_id not in self._image_cache]
+
+        for offset in range(0, len(missing), _IMAGE_BATCH_SIZE):
+            batch = missing[offset:offset + _IMAGE_BATCH_SIZE]
+            # Also cache unavailable images for this cycle, so another store
+            # doesn't repeat the same lookup. A new cycle can retry them.
+            self._image_cache.update({product_id: [] for product_id in batch})
+            params = [("ids", str(product_id)) for product_id in batch]
+            params.append(("sortOn", "INPUT_PRODUCT_IDS"))
+            try:
+                response = await self._client.get(
+                    f"{self._base_url}{_PRODUCT_CARDS_PATH}",
+                    params=params, headers=self._headers(),
+                )
+                if response.status_code == 401 and self._refresh_token:
+                    await self._refresh_access_token()
+                    response = await self._client.get(
+                        f"{self._base_url}{_PRODUCT_CARDS_PATH}",
+                        params=params, headers=self._headers(),
+                    )
+                response.raise_for_status()
+                cards = response.json()
+                if not isinstance(cards, list):
+                    raise ValueError("Expected a product-card array")
+                resolved: dict[int, list[AHProductImage]] = {}
+                for card in cards:
+                    product_id = int(card["webshopId"])
+                    if product_id not in batch:
+                        continue
+                    resolved[product_id] = [
+                        AHProductImage.model_validate(img) for img in (card.get("images") or [])
+                        if isinstance(img, dict) and img.get("url")
+                    ]
+                    images = resolved[product_id]
+                    if images:
+                        # REST often returns a tiny GIF first. Prefer the
+                        # smallest rendition suitable for the dashboard.
+                        suitable = [
+                            img for img in images
+                            if (img.width or 0) >= 400 and (img.height or 0) >= 400
+                        ]
+                        def area(img: AHProductImage) -> int:
+                            return (img.width or 0) * (img.height or 0)
+
+                        preferred = min(suitable, key=area) if suitable else max(images, key=area)
+                        resolved[product_id] = [preferred] + [
+                            img for img in images if img is not preferred
+                        ]
+                self._image_cache.update(resolved)
+                self._resolved_webshop_ids.update(resolved)
+            except Exception as exc:
+                # This is optional display data: even an unexpected upstream
+                # shape must not discard the prices and stock already fetched.
+                logger.warning("ah_product_images_unavailable", error=type(exc).__name__)
+                # Avoid repeatedly hitting an unavailable endpoint this cycle.
+                self._image_cache.update({product_id: [] for product_id in missing[offset:]})
+                break
+
+        for product in products:
+            lookup_id = product.webshop_id or product.id
+            images = self._image_cache.get(lookup_id, [])
+            if lookup_id in self._resolved_webshop_ids:
+                product.webshop_id = lookup_id
+            if images:
+                product.images = images
 
 
 async def _async_sleep(seconds: float) -> None:

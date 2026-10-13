@@ -18,10 +18,11 @@ Price convention:
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ah.models import AHBargainItem, AHStore
@@ -168,6 +169,67 @@ class BargainRepository:
         )
         return list(result.scalars().all())
 
+    async def prune_old_snapshots(self, retention_days: int) -> int:
+        """Delete expired snapshots and their items; the caller commits the transaction.
+
+        Zero keeps all history. Products and stores remain as metadata caches.
+        Bulk deletes bypass ORM cascades, so delete child rows explicitly even
+        on SQLite connections without foreign-key enforcement.
+        """
+        if retention_days < 0:
+            raise ValueError("retention_days must be non-negative")
+        if retention_days == 0:
+            return 0
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+        expired_ids = select(Snapshot.id).where(Snapshot.fetched_at < cutoff)
+        await self._session.execute(
+            delete(BargainItem)
+            .where(BargainItem.snapshot_id.in_(expired_ids))
+            .execution_options(synchronize_session=False)
+        )
+        result = await self._session.execute(
+            delete(Snapshot)
+            .where(Snapshot.fetched_at < cutoff)
+            .execution_options(synchronize_session=False)
+        )
+        return result.rowcount
+
+    async def get_stats(self) -> dict[str, int | datetime | None]:
+        """Return collection totals and the SQLite database's disk footprint."""
+        result = await self._session.execute(
+            select(
+                func.count(Snapshot.id).label("snapshot_count"),
+                func.min(Snapshot.fetched_at).label("oldest_snapshot"),
+                func.max(Snapshot.fetched_at).label("newest_snapshot"),
+                select(func.count(Product.id)).scalar_subquery().label("product_count"),
+            )
+        )
+        stats = dict(result.mappings().one())
+        stats["db_size_bytes"] = await self._database_size_bytes()
+        return stats
+
+    async def _database_size_bytes(self) -> int:
+        """Count main, WAL and shared-memory files; in-memory databases use no disk."""
+        if self._session.get_bind().dialect.name != "sqlite":
+            return 0
+        result = await self._session.execute(text("PRAGMA database_list"))
+        database_path = next(
+            (row["file"] for row in result.mappings() if row["name"] == "main"),
+            "",
+        )
+        if not database_path:
+            return 0
+
+        size = 0
+        for suffix in ("", "-wal", "-shm"):
+            try:
+                size += Path(database_path + suffix).stat().st_size
+            except FileNotFoundError:
+                # Sidecar files can disappear after a checkpoint or connection close.
+                pass
+        return size
+
     # -- Private helpers -----------------------------------------------------
 
     async def _upsert_store(self, store_id: int, ah_store: AHStore | None) -> Store:
@@ -217,6 +279,10 @@ class BargainRepository:
                 db_product.brand = p.brand
                 db_product.category = ah_item.category_title
                 db_product.sales_unit_size = p.sales_unit_size
+                if p.webshop_id is not None:
+                    if db_product.webshop_id != p.webshop_id:
+                        db_product.image_url = None
+                    db_product.webshop_id = p.webshop_id
                 db_product.last_seen_at = now
                 # Always update image_url if a fresh one is available
                 if p.image_url is not None:
@@ -228,6 +294,7 @@ class BargainRepository:
                     brand=p.brand,
                     category=ah_item.category_title,
                     sales_unit_size=p.sales_unit_size,
+                    webshop_id=p.webshop_id,
                     image_url=p.image_url,
                     first_seen_at=now,
                     last_seen_at=now,

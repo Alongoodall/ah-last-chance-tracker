@@ -13,22 +13,22 @@
 // ═══════════════════════════════════ STATE ═══════════════════════════════════
 
 const state = {
-  stores:          [],
+  stores: [],
   selectedStoreId: null,
-  bargains:        [],         // raw from API (latest snapshot)
-  filtered:        [],         // after client-side filters
-  search:          '',
-  minDiscount:     0,
-  category:        '',         // '' = all
-  inStockOnly:     true,
-  favoritesOnly:   false,
-  lastFetchedAt:   null,
-  loading:         false,
-  historyChart:    null,
-  autoRefreshMs:   5 * 60 * 1000,   // 5 minutes (fallback when SSE is down)
+  bargains: [],         // raw from API (latest snapshot)
+  filtered: [],         // after client-side filters
+  search: '',
+  minDiscount: 0,
+  category: '',         // '' = all
+  inStockOnly: true,
+  favoritesOnly: false,
+  lastFetchedAt: null,
+  loading: false,
+  historyChart: null,
+  autoRefreshMs: 5 * 60 * 1000,   // 5 minutes (fallback when SSE is down)
   autoRefreshTimer: null,
-  sseSource:       null,            // active EventSource, or null
-  sseConnected:    false,
+  sseSource: null,            // active EventSource, or null
+  sseConnected: false,
 };
 
 // ═══════════════════════════════════ FAVOURITES ══════════════════════════════
@@ -92,8 +92,8 @@ function discountTier(pct) {
 }
 
 function stockClass(n) {
-  if (n <= 2)  return 'stock-low';
-  if (n <= 5)  return 'stock-mid';
+  if (n <= 2) return 'stock-low';
+  if (n <= 5) return 'stock-mid';
   return 'stock-ok';
 }
 
@@ -105,7 +105,7 @@ function stockLabel(n) {
 
 function timeAgo(date) {
   const secs = Math.floor((Date.now() - date) / 1000);
-  if (secs < 60)  return `${secs}s geleden`;
+  if (secs < 60) return `${secs}s geleden`;
   if (secs < 3600) return `${Math.floor(secs / 60)}m geleden`;
   return `${Math.floor(secs / 3600)}u geleden`;
 }
@@ -163,16 +163,16 @@ function renderStoreSelect() {
   sel.innerHTML = state.stores.length === 0
     ? '<option value="">Geen winkels gevonden</option>'
     : state.stores.map(s => {
-        // Show real name+city when available, fall back to store ID
-        const hasName = s.name && s.name.trim();
-        const label = hasName
-          ? `${s.name}${s.city ? ' — ' + s.city : ''}`
-          : `Winkel #${s.id}`;
-        const snaps = s.snapshot_count > 0 ? ` (${s.snapshot_count}×)` : '';
-        return `<option value="${s.id}" ${s.id === state.selectedStoreId ? 'selected' : ''}>
+      // Show real name+city when available, fall back to store ID
+      const hasName = s.name && s.name.trim();
+      const label = hasName
+        ? `${s.name}${s.city ? ' — ' + s.city : ''}`
+        : `Winkel #${s.id}`;
+      const snaps = s.snapshot_count > 0 ? ` (${s.snapshot_count}×)` : '';
+      return `<option value="${s.id}" ${s.id === state.selectedStoreId ? 'selected' : ''}>
           ${label}${snaps}
         </option>`;
-      }).join('');
+    }).join('');
 }
 
 function renderCategorySelect() {
@@ -202,7 +202,7 @@ function renderStats() {
 }
 
 function renderRefresh() {
-  const dot   = document.getElementById('refresh-dot');
+  const dot = document.getElementById('refresh-dot');
   const label = document.getElementById('refresh-label');
   if (!state.lastFetchedAt) { dot.className = 'refresh-dot'; label.textContent = '–'; return; }
 
@@ -223,8 +223,8 @@ function buildCard(item) {
   const p = item.product;
   if (!p) return '';
 
-  const disc   = item.markdown_percentage ?? 0;
-  const tier   = discountTier(disc);
+  const disc = item.markdown_percentage ?? 0;
+  const tier = discountTier(disc);
   const saving = (item.price_was && item.price_now)
     ? item.price_was - item.price_now : null;
   const isFav = favourites.has(item.product_id);
@@ -233,7 +233,7 @@ function buildCard(item) {
   let expiryStr = '';
   if (item.markdown_expiration_date) {
     const exp = new Date(item.markdown_expiration_date);
-    const today = new Date(); today.setHours(0,0,0,0);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
     const days = Math.round((exp - today) / 86_400_000);
     if (days === 0) expiryStr = '⏰ Verloopt vandaag';
     else if (days === 1) expiryStr = '📅 Verloopt morgen';
@@ -300,7 +300,7 @@ function buildCard(item) {
 
 function renderCards() {
   const grid = document.getElementById('card-grid');
-  const msg  = document.getElementById('state-message');
+  const msg = document.getElementById('state-message');
 
   if (state.loading) {
     msg.innerHTML = '<div class="spinner"></div><p>Deals laden…</p>';
@@ -316,7 +316,7 @@ function renderCards() {
       <p style="font-size:12px;margin-top:8px">
         Voer eerst een collectie uit:<br>
         <code style="background:var(--card);padding:4px 8px;border-radius:4px;font-size:11px">
-          python scripts/collect_once.py --store-id 2203
+          python scripts/collect_once.py --store-id 2301
         </code>
       </p>`;
     msg.classList.remove('hidden');
@@ -361,7 +361,7 @@ function openHistoryPanel(productId, productTitle) {
 
   API.getHistory(productId, state.selectedStoreId)
     .then(data => renderHistoryPanel(data))
-    .catch(err  => {
+    .catch(err => {
       document.getElementById('history-subtitle').textContent = `Fout: ${err.message}`;
     });
 }
@@ -403,7 +403,7 @@ function renderHistoryPanel(data) {
 
   // Chart
   const labels = entries.map(e => formatDateTime(e.fetched_at));
-  const prices  = entries.map(e => e.price_now);
+  const prices = entries.map(e => e.price_now);
   const discounts = entries.map(e => e.markdown_percentage);
 
   const chartFont = { family: "'Inter', sans-serif", size: 11 };
@@ -591,13 +591,13 @@ function showToast(message) {
 /** Update the SSE indicator dot + label. */
 function setSseStatus(status) {
   // status: 'connected' | 'reconnecting' | 'disconnected'
-  const dot   = document.getElementById('sse-dot');
+  const dot = document.getElementById('sse-dot');
   const label = document.getElementById('sse-label');
   if (!dot || !label) return;
 
   dot.className = `sse-dot ${status}`;
   const labels = {
-    connected:    'Live',
+    connected: 'Live',
     reconnecting: 'Verbinden…',
     disconnected: 'Offline',
   };
@@ -649,7 +649,7 @@ function startSSE() {
   });
 
   // 'ping' events are keepalive — no action needed
-  es.addEventListener('ping', () => {});
+  es.addEventListener('ping', () => { });
 
   es.addEventListener('error', () => {
     setSseStatus('reconnecting');

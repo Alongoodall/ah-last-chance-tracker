@@ -15,7 +15,7 @@ NotifierService
 Usage
 -----
     detector = AlertDetector()
-    events = detector.compare(prev_items, curr_items, store_id=2203)
+    events = detector.compare(prev_items, curr_items, store_id=2301)
     await notifier.dispatch_all(events)
 
 Alert triggers

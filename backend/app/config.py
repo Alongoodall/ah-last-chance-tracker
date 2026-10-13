@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -13,14 +13,14 @@ class Settings(BaseSettings):
     Every setting has a sensible default so the app starts out of the box.
 
     Key variables:
-        AH_STORE_IDS=2203,1812
+        AH_STORE_IDS=2203,2301
             Comma-separated store IDs to collect.
 
-        AH_STORE_POSTAL_CODES=2203:1091GH,1812:1234AB
+        AH_STORE_POSTAL_CODES=2203:1091GH,2301:1234AB
             Optional: postal codes per store so the collector can look up
             the store name/address from the AH API automatically.
 
-        AH_STORE_NAMES=2203:AH Eerste Oosterparkstraat,1812:AH Centrum
+        AH_STORE_NAMES=2203:AH Eerste Oosterparkstraat,2301:AH Cruquiusweg
             Optional: manual display-name overrides per store.
             Takes precedence over whatever the API returns.
     """
@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     ah_store_names: str = ""          # "storeId:Display Name,..."
 
     collection_interval_minutes: int = 10
+    ah_retention_days: int = Field(default=30, ge=0)
+    """Keep snapshots for this many days; 0 disables automatic pruning."""
 
     # --- Notifications ---
     # ntfy.sh (or self-hosted ntfy) push notifications.

@@ -43,6 +43,8 @@ class AHProductImage(BaseModel):
     """A product image returned by the AH API."""
 
     url: str
+    width: int | None = None
+    height: int | None = None
 
 
 class AHBargainProduct(BaseModel):
@@ -52,7 +54,10 @@ class AHBargainProduct(BaseModel):
     title: str
     brand: str = ""
     sales_unit_size: str = Field(default="", alias="salesUnitSize")
+    webshop_id: int | None = Field(default=None, alias="webshopId")
     images: list[AHProductImage] = []
+
+    model_config = {"populate_by_name": True}
 
     @field_validator("brand", "sales_unit_size", mode="before")
     @classmethod
@@ -61,7 +66,7 @@ class AHBargainProduct(BaseModel):
 
     @property
     def image_url(self) -> str | None:
-        """Return the URL of the first product image, or None."""
+        """Return the resolved image URL; DAM asset IDs cannot be guessed."""
         return self.images[0].url if self.images else None
 
 

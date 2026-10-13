@@ -39,6 +39,7 @@ def _make_collector(
         name_overrides=settings.store_names,
         notifier=make_notifier_from_settings(settings),
         event_bus=event_bus,
+        retention_days=settings.ah_retention_days,
     )
 
 

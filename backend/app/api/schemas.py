@@ -82,6 +82,7 @@ class ProductResponse(BaseModel):
     brand: str
     category: str
     sales_unit_size: str
+    webshop_id: int | None = None
     image_url: str | None = None
 
 
